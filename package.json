@@ -1,0 +1,29 @@
+{
+	"name": "test",
+	"private": true,
+	"version": "0.0.0",
+	"scripts": {
+		"start": "vite",
+		"serve": "vite",
+		"build": "tsc && vite build"
+	},
+	"dependencies": {
+		"@motion-canvas/2d": "^3.17.2",
+		"@motion-canvas/core": "^3.17.2",
+		"@motion-canvas/ffmpeg": "^1.1.0",
+		"cubane": "^1.0.17",
+		"install": "^0.13.0",
+		"motion-canvas-3d": "^0.4.0",
+		"n8ao": "^1.10.1",
+		"npm": "^11.4.2",
+		"postprocessing": "^6.37.4",
+		"three": "^0.176.0"
+	},
+	"devDependencies": {
+		"@motion-canvas/ui": "^3.17.2",
+		"@motion-canvas/vite-plugin": "^3.17.2",
+		"@types/three": "^0.176.0",
+		"typescript": "^5.2.2",
+		"vite": "^4.0.0"
+	}
+}
