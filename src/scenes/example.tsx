@@ -49,38 +49,8 @@ export default makeScene2D(function* (view) {
   // Create the world grid to track all blocks
   const world = new WorldGrid();
 
-  // Set up camera
-  c.camera.position([0, 0, -4]);
-  c.camera.lookAt([0.5, 0, 0]);
-
-  // Create the first piston at grid position [0, 1, 0] facing east
-  const piston = yield Piston.create(
-    c,
-    world,
-    cubane,
-    [-1, 1, 0],
-    "sticky"
-  );
-
-  // Create some blocks for the piston to push
-  const stoneBlock1 = yield Block.create( // Updated to use Block directly
-    c,
-    world,
-    cubane,
-    "minecraft:stone",
-    [0, 1, 0]  // 1 block in front of piston
-  );
-
-  const stoneBlock2 = yield Block.create( // Updated to use Block directly
-    c,
-    world,
-    cubane,
-    "minecraft:stone",
-    [1, 1, 0]  // 1 block in front of piston
-  );
-
-  // Create second piston facing up
-  const secondPiston = yield Piston.create(c, world, cubane, [2, 0, 0], "regular", "up");
+  c.camera.position([2, 3, 7]);
+  c.camera.lookAt([2, 3, 0]); // Look at the action area
 
   // Add canvas to view
   view.add(c);
@@ -100,86 +70,200 @@ export default makeScene2D(function* (view) {
 
   // Optional: Add some ground plane for visual reference
   c.create(() => {
-    const geometry = new THREE.PlaneGeometry(10, 10);
+    const geometry = new THREE.PlaneGeometry(20, 20);
     const material = new THREE.MeshLambertMaterial({
       color: 0x90EE90
     });
     const plane = new THREE.Mesh(geometry, material);
     plane.rotation.x = -Math.PI / 2;
     plane.position.y = -0.5;
+    plane.position.x = 2;
+    plane.receiveShadow = true; // Allow shadows to be cast on the ground
+
     return plane;
   });
 
-  // Log initial state
-  console.log("=== INITIAL STATE ===");
-  console.log("First piston at:", piston.gridPosition);
-  console.log("First Stone block at:", stoneBlock1.gridPosition);
-  console.log("Second Stone block at:", stoneBlock2.gridPosition);
-  console.log("Second piston at:", secondPiston.gridPosition);
-  console.log("World positions:", world.getAllPositions());
 
-  // Animation sequence
+  const doorMaterial = "minecraft:white_concrete"; // Use a simple material for the door
+  // Create the first piston at grid position [0, 1, 0] facing east
+  const blockStorage = yield Piston.create(
+    c,
+    world,
+    cubane,
+    [0, 2, 0],
+    "sticky"
+  );
+
+  // Create second piston facing up
+  const doubleBottom = yield Piston.create(c, world, cubane, [2, 0, 0], "sticky", "up");
+  const doubleTop = yield Piston.create(c, world, cubane, [2, 1, 0], "sticky", "up");
+
+
+
+  // create left 3 pistons
+  const leftPiston1 = yield Piston.create(c, world, cubane, [-1, 3, 0], "sticky", "east");
+  const leftPiston2 = yield Piston.create(c, world, cubane, [-1, 4, 0], "sticky", "east");
+  const leftPiston3 = yield Piston.create(c, world, cubane, [-1, 5, 0], "sticky", "east");
+
+  // create left 3 blocks
+  const leftBlock1 = yield Block.create( // Updated to use Block directly
+    c,
+    world,
+    cubane,
+    doorMaterial,
+    [0, 3, 0]  // 1 block in front of piston
+  );
+
+  const leftBlock2 = yield Block.create( // Updated to use Block directly
+    c,
+    world,
+    cubane,
+    doorMaterial,
+    [0, 4, 0]  // 1 block in front of piston
+  );
+  const leftBlock3 = yield Block.create( // Updated to use Block directly
+    c,
+    world,
+    cubane,
+    doorMaterial,
+    [0, 5, 0]  // 1 block in front of piston
+  );
+
+  // create right 3 pistons
+  const rightPiston1 = yield Piston.create(c, world, cubane, [5, 3, 0], "sticky", "west");
+  const rightPiston2 = yield Piston.create(c, world, cubane, [5, 4, 0], "sticky", "west");
+  const rightPiston3 = yield Piston.create(c, world, cubane, [5, 5, 0], "sticky", "west");
+
+  // create right 3 blocks
+  const rightBlock1 = yield Block.create( // Updated to use Block directly
+    c,
+    world,
+    cubane,
+    doorMaterial,
+    [4, 3, 0]  // 1 block in front of piston
+  );
+  const rightBlock2 = yield Block.create( // Updated to use Block directly
+    c,
+    world,
+    cubane,
+    doorMaterial,
+    [4, 4, 0]  // 1 block in front of piston
+  );
+  const rightBlock3 = yield Block.create( // Updated to use Block directly
+    c,
+    world,
+    cubane,
+    doorMaterial,
+    [4, 5, 0]  // 1 block in front of piston
+  );
+
+  // Top piston 
+  const topPiston1 = yield Piston.create(c, world, cubane, [2, 7, 0], "sticky", "down");
+
+  // Top block
+  const topBlock1 = yield Block.create( // Updated to use Block directly
+    c,
+    world,
+    cubane,
+    doorMaterial,
+    [2, 6, 0]  // 1 block in front of piston
+  );
+
+
+  // Create some blocks for the piston to push
+  const block1 = yield Block.create( // Updated to use Block directly
+    c,
+    world,
+    cubane,
+    doorMaterial,
+    [1, 2, 0]  // 1 block in front of piston
+  );
+
+  const block2 = yield Block.create( // Updated to use Block directly
+    c,
+    world,
+    cubane,
+    doorMaterial,
+    [2, 2, 0]  // 1 block in front of piston
+  );
+
+  const lastFloorBlock = yield Block.create( // Updated to use Block directly
+    c,
+    world,
+    cubane,
+    doorMaterial,
+    [3, 2, 0]  // 1 block in front of piston
+  );
+
+  const fillerCeilingBlock1 = yield Block.create( // Updated to use Block directly
+    c,
+    world,
+    cubane,
+    doorMaterial,
+    [1, 6, 0]  // 1 block in front of piston
+  );
+  const fillerCeilingBlock2 = yield Block.create( // Updated to use Block directly
+    c,
+    world,
+    cubane,
+    doorMaterial,
+    [3, 6, 0]  // 1 block in front of piston
+  );
+
+
+
+
   yield* all(
     // Camera rotation
-    tween(12.0, (t) => {
-      const angle = Math.PI * t;
-      c.camera.position([
-        Math.sin(angle) * 5,
-        3,
-        Math.cos(angle) * 5
-      ]);
-      c.camera.lookAt([1, 1, 0]); // Look at the action area
-    }),
+    // tween(12.0, (t) => {
+    //   const angle = Math.PI * t;
+    //   c.camera.position([
+    //     Math.sin(angle) * 10,
+    //     8,
+    //     Math.cos(angle) * 10
+    //   ]);
+    //   c.camera.lookAt([1, 1, 0]); // Look at the action area
+    // }),
 
-    // Piston animation sequence
     (function* () {
-      console.log("=== STARTING FIRST PISTON ===");
-
-      // First piston extends
-      yield* tween(0.5, (t) => {
-        const pistonExt = easeInOutCubic(t);
-        piston.extension(pistonExt);
-      });
-
-      console.log("=== FIRST PISTON EXTENDED ===");
-      console.log("World positions after first piston:", world.getAllPositions());
-
-      // Wait a bit to ensure the block is in the right position
-      yield* waitFor(0.2);
-
-      console.log("=== STARTING SECOND PISTON ===");
-
-      // Second piston extends
-      yield* tween(0.5, (t) => {
-        const pistonExt = easeInOutCubic(t);
-        secondPiston.extension(pistonExt);
-      });
-
-      console.log("=== SECOND PISTON EXTENDED ===");
-      console.log("Final world positions:", world.getAllPositions());
-
-      // Wait a bit then retract both pistons
-      yield* waitFor(1.0);
-
-      // Retract second piston first
-      yield* tween(0.5, (t) => {
-        const pistonExt = 1 - easeInOutCubic(t);
-        secondPiston.extension(pistonExt);
-      });
-
-      // Then retract first piston
-      yield* tween(0.5, (t) => {
-        const pistonExt = 1 - easeInOutCubic(t);
-        piston.extension(pistonExt);
-      });
-
-      console.log("=== PISTONS RETRACTED ===");
-      console.log("Final world positions:", world.getAllPositions());
+      yield* doubleBottom.pulse(0.4);
+      yield* blockStorage.extend(0.2);
+      // yield* doubleTop.pulse(1, true);
+      yield* all(
+        leftPiston1.extend(0.2),
+        leftPiston2.extend(0.2),
+        leftPiston3.extend(0.2),
+        rightPiston1.extend(0.2),
+        rightPiston2.extend(0.2),
+        rightPiston3.extend(0.2),
+        topPiston1.extend(0.2),
+        doubleTop.extend(0.2),
+      )
     })(),
   );
 
-  // Log final state for debugging
-  console.log("=== FINAL STATE ===");
-  console.log("World has", world.getBlockCount(), "blocks");
-  console.log("Block positions:", world.getAllPositions());
+  yield* waitFor(0.5);
+  //retract all pistons
+  yield* all(
+    leftPiston1.retract(0.2),
+    leftPiston2.retract(0.2),
+    leftPiston3.retract(0.2),
+    rightPiston1.retract(0.2),
+    rightPiston2.retract(0.2),
+    rightPiston3.retract(0.2),
+    topPiston1.retract(0.2),
+    doubleTop.retract(0.2),
+  );
+
+  yield* waitFor(0.1);
+  yield* blockStorage.retract(0.2);
+  yield* waitFor(0.1);
+  yield* doubleBottom.extend(0.2);
+  yield* doubleTop.pulse(0.2);
+
+  yield* waitFor(0.4);
+  yield* doubleBottom.retract(0.2);
+  yield* waitFor(2);
+
+
 });

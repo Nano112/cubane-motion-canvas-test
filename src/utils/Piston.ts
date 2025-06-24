@@ -1,4 +1,4 @@
-import { SimpleSignal, createSignal, tween } from "@motion-canvas/core";
+import { SimpleSignal, createSignal, all, tween } from "@motion-canvas/core";
 import { Block } from "./Block";
 import { WorldGrid } from "./WorldGrid";
 import { SignalableObject3D } from "../motion-canvas-3d";
@@ -6,27 +6,27 @@ import * as THREE from "three";
 import ThreeCanvasWithPostProcessing from "./ThreeCanvasWithPostProcessing";
 import { Cubane } from "cubane";
 
+enum PistonState {
+	IDLE,
+	EXTENDING,
+	EXTENDED,
+	RETRACTING,
+}
+
 export default class Piston extends Block {
 	public extension: SimpleSignal<number, void>;
 	private pistonHeadShort: SignalableObject3D;
 	private pistonHeadNormal: SignalableObject3D;
 
-	// Piston state
-	private isExtending: boolean = false;
-	private isRetracting: boolean = false;
+	private state: PistonState = PistonState.IDLE;
 	private isSticky: boolean = false;
-
-	// Piston direction
 	private pushDirection: [number, number, number] = [1, 0, 0];
 
-	// Animation tracking for pushed blocks
-	private blocksBeingPushed: Block[] = [];
-	private blockStartPositions: Map<Block, [number, number, number]> = new Map();
+	private shouldDropBlock: boolean = false;
 
-	// State tracking for deterministic behavior
-	private hasStartedPush: boolean = false;
-	private hasFinalized: boolean = false;
-	private lastProcessedExtension: number = -1; // Track last extension we processed
+	private blocksInMotion: Block[] = [];
+	private blockStartPositions: Map<Block, [number, number, number]> = new Map();
+	private lastProcessedExtension: number = 0;
 
 	private constructor(
 		canvas: ThreeCanvasWithPostProcessing,
@@ -39,22 +39,13 @@ export default class Piston extends Block {
 		isSticky: boolean = false
 	) {
 		super(canvas, world, bodyMesh, blockType, initialGridPosition);
-
 		this.isSticky = isSticky;
 		this.extension = createSignal<number>(0);
-
-		// Add the piston heads to canvas
 		[this.pistonHeadShort] = canvas.push(shortHeadMesh);
 		[this.pistonHeadNormal] = canvas.push(normalHeadMesh);
-
-		// Set initial visibility
 		this.pistonHeadShort.object.visible = true;
 		this.pistonHeadNormal.object.visible = false;
-
-		// Initialize head positions
 		this.updateHeadPositions();
-
-		// Add update callback - this is called every frame
 		canvas.addDynamicObject({
 			position: createSignal([0, 0, 0]),
 			scale: createSignal([1, 1, 1]),
@@ -75,7 +66,6 @@ export default class Piston extends Block {
 	): Promise<Piston> {
 		const blockType = type === "sticky" ? "sticky_piston" : "piston";
 		const headType = type === "sticky" ? "sticky" : "normal";
-
 		const facingMap = {
 			east: {
 				blockState: "east",
@@ -102,9 +92,7 @@ export default class Piston extends Block {
 				pushDirection: [0, -1, 0] as [number, number, number],
 			},
 		};
-
 		const facingData = facingMap[facing];
-
 		const [bodyMesh, shortHeadMesh, normalHeadMesh] = await Promise.all([
 			cubane.getBlockMesh(
 				`minecraft:${blockType}[facing=${facingData.blockState},extended=true]`
@@ -116,7 +104,6 @@ export default class Piston extends Block {
 				`minecraft:piston_head[extended=true,facing=${facingData.blockState},short=false,type=${headType}]`
 			),
 		]);
-
 		const piston = new Piston(
 			canvas,
 			world,
@@ -127,18 +114,33 @@ export default class Piston extends Block {
 			initialGridPosition,
 			type === "sticky"
 		);
-
 		piston.setPushDirection(facingData.pushDirection);
 		return piston;
 	}
 
+	public *extend(duration: number = 0.2) {
+		if (this.state !== PistonState.IDLE) return;
+		yield* tween(duration, (t) => this.extension(t));
+	}
+
+	public *retract(duration: number = 0.2) {
+		if (this.state !== PistonState.EXTENDED) return;
+		this.shouldDropBlock = false;
+		yield* tween(duration, (t) => this.extension(1 - t));
+	}
+
+	public *pulse(duration: number = 0.4, drop: boolean = false) {
+		if (this.state !== PistonState.IDLE) return;
+		this.shouldDropBlock = drop;
+		yield* tween(duration, (t) => {
+			const progress = 1 - Math.abs(1 - 2 * t);
+			this.extension(progress);
+		});
+		this.shouldDropBlock = false;
+	}
+
 	public canBePushed(): boolean {
-		return (
-			this.extension() === 0 &&
-			!this.isExtending &&
-			!this.isRetracting &&
-			!this.isMoving
-		);
+		return this.extension() === 0 && this.state === PistonState.IDLE;
 	}
 
 	public setPushDirection(direction: [number, number, number]): void {
@@ -150,99 +152,54 @@ export default class Piston extends Block {
 		this.updateHeadPositions();
 	}
 
-	public setRotation(quat: [number, number, number, number]): void {
-		super.setRotation(quat);
-		this.pistonHeadShort.quaternion(quat);
-		this.pistonHeadNormal.quaternion(quat);
-	}
-
 	private updateHeadPositions(): void {
 		const ext = this.extension();
 		const basePos = this.getWorldPosition();
-
-		// Calculate head position with proper rounding to avoid floating point issues
 		const headPos: [number, number, number] = [
-			Math.round((basePos[0] + this.pushDirection[0] * ext) * 1000) / 1000,
-			Math.round((basePos[1] + this.pushDirection[1] * ext) * 1000) / 1000,
-			Math.round((basePos[2] + this.pushDirection[2] * ext) * 1000) / 1000,
+			basePos[0] + this.pushDirection[0] * ext,
+			basePos[1] + this.pushDirection[1] * ext,
+			basePos[2] + this.pushDirection[2] * ext,
 		];
-
 		this.pistonHeadShort.position(headPos);
 		this.pistonHeadNormal.position(headPos);
-
-		// Switch between short and normal head at exactly 0.25 extension
 		const shouldShowNormal = ext >= 0.25;
-		if (this.pistonHeadNormal.object.visible !== shouldShowNormal) {
-			this.pistonHeadShort.object.visible = !shouldShowNormal;
-			this.pistonHeadNormal.object.visible = shouldShowNormal;
-		}
+		this.pistonHeadShort.object.visible = !shouldShowNormal;
+		this.pistonHeadNormal.object.visible = shouldShowNormal;
 	}
 
-	private processExtensionState(currentExtension: number): void {
-		// Round to avoid floating point comparison issues
-		currentExtension = Math.round(currentExtension * 1000) / 1000;
-
-		// State transitions based on specific extension values
-		if (
-			currentExtension > 0 &&
-			currentExtension < 0.1 &&
-			!this.hasStartedPush
-		) {
-			// Start pushing when extension begins
-			this.hasStartedPush = true;
-			this.hasFinalized = false;
+	private processState(currentExtension: number): void {
+		if (this.state === PistonState.IDLE && currentExtension > 0) {
+			this.state = PistonState.EXTENDING;
 			this.startPushing();
 		}
 
-		if (
-			currentExtension >= 0.999 &&
-			!this.hasFinalized &&
-			this.blocksBeingPushed.length > 0
-		) {
-			// Finalize when fully extended
-			this.finalizePushedBlocks();
-			this.hasFinalized = true;
+		if (this.state === PistonState.EXTENDING && currentExtension >= 0.999) {
+			this.state = PistonState.EXTENDED;
+			this.finalizeExtension();
+		}
+
+		if (this.state === PistonState.EXTENDED && currentExtension < 0.999) {
+			this.state = PistonState.RETRACTING;
+			this.prepareForRetraction();
+		}
+
+		if (this.state === PistonState.RETRACTING && currentExtension <= 0.001) {
+			this.finalizeRetraction();
+			this.state = PistonState.IDLE;
 		}
 
 		if (
-			this.isSticky &&
-			this.lastProcessedExtension >= 0.999 &&
-			currentExtension < 0.999 &&
-			!this.hasStartedPush
+			this.state === PistonState.EXTENDING ||
+			this.state === PistonState.RETRACTING
 		) {
-			// Sticky piston starting to retract
-			this.hasStartedPush = true;
-			this.hasFinalized = false;
-			this.startPulling();
-		}
-
-		if (currentExtension <= 0.001) {
-			// Reset when fully retracted
-			if (this.blocksBeingPushed.length > 0 && !this.hasFinalized) {
-				this.finalizePushedBlocks();
-				this.hasFinalized = true;
-			}
-			this.hasStartedPush = false;
-		}
-
-		// Update positions if we have blocks to move
-		if (this.blocksBeingPushed.length > 0) {
-			this.updatePushedBlockPositions(currentExtension);
+			this.updateBlockPositions(currentExtension);
 		}
 
 		this.lastProcessedExtension = currentExtension;
 	}
 
 	private startPushing(): void {
-		if (this.blocksBeingPushed.length > 0) return;
-
-		console.log(`\n=== PISTON PUSH START ===`);
-		console.log(
-			`Piston at: [${this.gridPosition}], direction: [${this.pushDirection}]`
-		);
-
-		// Get blocks in front of piston
-		const blocksInPath = this.world.getBlocksInLine(
+		const blocksToPush = this.world.getBlocksInLine(
 			this.gridPosition[0],
 			this.gridPosition[1],
 			this.gridPosition[2],
@@ -251,156 +208,127 @@ export default class Piston extends Block {
 			this.pushDirection[2],
 			12
 		);
-
-		if (blocksInPath.length === 0) {
-			console.log("No blocks to push");
-			return;
-		}
-
-		// Filter to only pushable blocks (not other pistons)
-		const pushableBlocks = blocksInPath.filter((block) => {
-			if (block instanceof Piston) {
-				return false;
-			}
-			return block.canBePushed();
-		});
-
-		if (pushableBlocks.length !== blocksInPath.length) {
-			console.log("Cannot push - immovable block in chain");
-			return;
-		}
-
-		// Check if there's space for all blocks
 		if (
+			blocksToPush.length === 0 ||
 			!this.world.canPushChain(
-				pushableBlocks,
+				blocksToPush,
 				this.pushDirection[0],
 				this.pushDirection[1],
 				this.pushDirection[2]
 			)
 		) {
-			console.log("Cannot push - no space for blocks");
+			this.state = PistonState.IDLE;
+			return;
+		}
+		this.blocksInMotion = blocksToPush;
+		this.blocksInMotion.forEach((block) => {
+			block.isMoving = true;
+			this.blockStartPositions.set(block, [...block.gridPosition]);
+		});
+	}
+
+	private finalizeExtension(): void {
+		if (this.blocksInMotion.length === 0) return;
+
+		const moveOperations: {
+			block: Block;
+			finalPos: [number, number, number];
+		}[] = [];
+		this.blocksInMotion.forEach((block) => {
+			const startPos = this.blockStartPositions.get(block);
+			if (!startPos) return;
+			const finalGridPos: [number, number, number] = [
+				startPos[0] + this.pushDirection[0],
+				startPos[1] + this.pushDirection[1],
+				startPos[2] + this.pushDirection[2],
+			];
+			moveOperations.push({ block, finalPos: finalGridPos });
+		});
+
+		moveOperations.reverse();
+
+		moveOperations.forEach(({ block, finalPos }) => {
+			block.setPosition(finalPos);
+			block.isMoving = false;
+		});
+
+		if (!this.isSticky) {
+			this.blocksInMotion = [];
+			this.blockStartPositions.clear();
+		}
+	}
+
+	private prepareForRetraction(): void {
+		if (this.shouldDropBlock || !this.isSticky) {
+			this.blocksInMotion = [];
+			this.blockStartPositions.clear();
 			return;
 		}
 
-		// Start tracking blocks
-		this.blocksBeingPushed = pushableBlocks;
-		pushableBlocks.forEach((block) => {
-			block.isMoving = true;
-			// Store the current grid position
-			this.blockStartPositions.set(block, [...block.gridPosition]);
-		});
+		if (this.blocksInMotion.length > 0) {
+			const blockToPull = this.blocksInMotion[0];
 
-		console.log(`Started pushing ${pushableBlocks.length} blocks`);
-	}
+			this.blocksInMotion.slice(1).forEach((b) => (b.isMoving = false));
 
-	private startPulling(): void {
-		if (!this.isSticky || this.blocksBeingPushed.length > 0) return;
+			this.blocksInMotion = [blockToPull];
+			blockToPull.isMoving = true;
 
-		const blockInFront = this.world.getBlock(
-			this.gridPosition[0] + this.pushDirection[0],
-			this.gridPosition[1] + this.pushDirection[1],
-			this.gridPosition[2] + this.pushDirection[2]
-		);
-
-		if (
-			blockInFront &&
-			blockInFront.canBePushed() &&
-			!(blockInFront instanceof Piston)
-		) {
-			console.log(`Sticky piston pulling block: ${blockInFront.blockType}`);
-			this.blocksBeingPushed = [blockInFront];
-			blockInFront.isMoving = true;
-			this.blockStartPositions.set(blockInFront, [
-				...blockInFront.gridPosition,
-			]);
+			const currentPos = [...blockToPull.gridPosition];
+			this.blockStartPositions.clear();
+			this.blockStartPositions.set(
+				blockToPull,
+				currentPos as [number, number, number]
+			);
 		}
 	}
 
-	private updatePushedBlockPositions(currentExtension: number): void {
-		const roundedExtension = Math.round(currentExtension * 1000) / 1000;
-
-		// For pushing or sticky pistons extending
-		if (!this.isSticky || currentExtension > this.lastProcessedExtension) {
-			this.blocksBeingPushed.forEach((block) => {
+	private updateBlockPositions(currentExtension: number): void {
+		if (this.state === PistonState.RETRACTING) {
+			this.blocksInMotion.forEach((block) => {
 				const startPos = this.blockStartPositions.get(block);
 				if (!startPos) return;
-
-				// Calculate position based on integer start position + extension
+				const pullBackAmount = 1 - currentExtension;
 				const newWorldPos: [number, number, number] = [
-					startPos[0] + this.pushDirection[0] * roundedExtension,
-					startPos[1] + this.pushDirection[1] * roundedExtension,
-					startPos[2] + this.pushDirection[2] * roundedExtension,
+					startPos[0] - this.pushDirection[0] * pullBackAmount,
+					startPos[1] - this.pushDirection[1] * pullBackAmount,
+					startPos[2] - this.pushDirection[2] * pullBackAmount,
 				];
-
-				block.setWorldPosition(newWorldPos, true);
+				block.setWorldPosition(newWorldPos);
 			});
-		}
-		// For sticky pistons pulling
-		else if (this.isSticky && this.blocksBeingPushed.length === 1) {
-			const block = this.blocksBeingPushed[0];
-			const startPos = this.blockStartPositions.get(block);
-			if (!startPos) return;
-
-			const newWorldPos: [number, number, number] = [
-				startPos[0] - this.pushDirection[0] * (1 - roundedExtension),
-				startPos[1] - this.pushDirection[1] * (1 - roundedExtension),
-				startPos[2] - this.pushDirection[2] * (1 - roundedExtension),
-			];
-
-			block.setWorldPosition(newWorldPos, true);
+		} else if (this.state === PistonState.EXTENDING) {
+			this.blocksInMotion.forEach((block) => {
+				const startPos = this.blockStartPositions.get(block);
+				if (!startPos) return;
+				const newWorldPos: [number, number, number] = [
+					startPos[0] + this.pushDirection[0] * currentExtension,
+					startPos[1] + this.pushDirection[1] * currentExtension,
+					startPos[2] + this.pushDirection[2] * currentExtension,
+				];
+				block.setWorldPosition(newWorldPos);
+			});
 		}
 	}
 
-	private finalizePushedBlocks(): void {
-		if (this.blocksBeingPushed.length === 0) return;
-
-		console.log(`\n=== FINALIZING ${this.blocksBeingPushed.length} BLOCKS ===`);
-
-		this.blocksBeingPushed.forEach((block) => {
-			block.isMoving = false;
-			// Ensure final grid position is correct
-			const worldPos = block.getWorldPosition();
+	private finalizeRetraction(): void {
+		if (this.blocksInMotion.length === 0) return;
+		this.blocksInMotion.forEach((block) => {
+			const finalWorldPos = block.getWorldPosition();
 			const finalGridPos: [number, number, number] = [
-				Math.round(worldPos[0]),
-				Math.round(worldPos[1]),
-				Math.round(worldPos[2]),
+				Math.round(finalWorldPos[0]),
+				Math.round(finalWorldPos[1]),
+				// THIS IS THE FIX
+				Math.round(finalWorldPos[2]),
 			];
 			block.setPosition(finalGridPos);
-			console.log(
-				`Block ${block.blockType} finalized at grid [${finalGridPos}]`
-			);
+			block.isMoving = false;
 		});
-
-		this.blocksBeingPushed = [];
+		this.blocksInMotion = [];
 		this.blockStartPositions.clear();
 	}
 
 	public update(): void {
 		const currentExtension = this.extension();
-
-		// Process state changes
-		this.processExtensionState(currentExtension);
-
-		// Always update head positions
+		this.processState(currentExtension);
 		this.updateHeadPositions();
-	}
-
-	public *extend(duration: number = 0.2) {
-		if (this.isExtending || this.extension() > 0) return;
-		this.isExtending = true;
-		yield* tween(duration, (t) => {
-			this.extension(t);
-		});
-		this.isExtending = false;
-	}
-
-	public *retract(duration: number = 0.2) {
-		if (this.isRetracting || this.extension() === 0) return;
-		this.isRetracting = true;
-		yield* tween(duration, (t) => {
-			this.extension(1 - t);
-		});
-		this.isRetracting = false;
 	}
 }
