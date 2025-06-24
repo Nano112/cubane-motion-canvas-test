@@ -6,6 +6,8 @@ import GammaCorrectionEffect from "./GammaCorrectionEffect";
 
 import { N8AOPostPass } from "n8ao";
 
+import * as THREE from "three";
+
 export default class ThreeCanvasWithPostProcessing extends ThreeCanvas {
 	public composer: EffectComposer;
 	public gammaCorrectionEffect: GammaCorrectionEffect;
@@ -44,5 +46,9 @@ export default class ThreeCanvasWithPostProcessing extends ThreeCanvas {
 			this.position.x() - this.canvas.width / 2,
 			this.position.y() - this.canvas.height / 2
 		);
+	}
+
+	public setBackgroundColor(color: number): void {
+		this.threeScene.background = new THREE.Color(color);
 	}
 }
